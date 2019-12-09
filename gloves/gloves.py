@@ -18,7 +18,7 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 from detectron2.engine import DefaultTrainer
 from detectron2.config import get_cfg
-
+from detectron2.utils.visualizer import ColorMode
 
 setup_logger()
 
@@ -46,7 +46,7 @@ def get_balloon_dicts(dataset_dir):
 
     dataset_dicts = []
 
-    # Getting dataset name
+    # Iteration for dataset classes folders
     for img_dir in os.listdir(dataset_dir):
         class_name: str = ''  # class name like /m/012074
 
@@ -66,8 +66,8 @@ def get_balloon_dicts(dataset_dir):
 
         # Annotation CSV Files
         sorted = {}
-        dataset_type = dataset_dir.split('/')[1]    # train | validation | test
-        annotations_bbox = pd.read_csv('Dataset/' + dataset_type + '-annotations-bbox.csv')     # annotations-bbox.csv
+        dataset_type = dataset_dir.split('/')[1]  # train | validation | test
+        annotations_bbox = pd.read_csv('Dataset/' + dataset_type + '-annotations-bbox.csv')  # annotations-bbox.csv
         # getting images that only existing in image_names
         for index, row in annotations_bbox[(annotations_bbox.LabelName == class_name)].iterrows():
             if row['ImageID'] in image_names:
@@ -104,23 +104,19 @@ def get_balloon_dicts(dataset_dir):
 
     return dataset_dicts
 
-
-for d in ["train", "validation"]:
-    DatasetCatalog.register("gloves_" + d, lambda d=d: get_balloon_dicts("Dataset/" + d))
-    MetadataCatalog.get("gloves_" + d).set(thing_classes=['glove'])
-balloon_metadata = MetadataCatalog.get("g_train")
-
+'''
+# Visualize results
 dataset_dicts = get_balloon_dicts("Dataset/train")
 
 for d in random.sample(dataset_dicts, 3):
     img = cv2.imread(d["file_name"])
-    visualizer = Visualizer(img, metadata=balloon_metadata, scale=0.5)
+    visualizer = Visualizer(img, metadata=metadata, scale=0.5)
     vis = visualizer.draw_dataset_dict(d)
-    #   print(d)
-    #   print(len(d['annotations']))
-    # cv2.imshow('', vis.get_image()[:, :, ::-1])
-    # cv2.waitKey()
-
+        print(d)
+        print(len(d['annotations']))
+    cv2.imshow('', vis.get_image()[:, :, ::-1])
+    cv2.waitKey()
+'''
 
 # Train
 cfg = get_cfg()
@@ -128,14 +124,65 @@ cfg.merge_from_file("../configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.
 cfg.DATASETS.TRAIN = ("gloves_train",)
 cfg.DATASETS.TEST = ()
 cfg.DATALOADER.NUM_WORKERS = 2
-cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
 cfg.SOLVER.IMS_PER_BATCH = 2
 cfg.SOLVER.BASE_LR = 0.00025
 cfg.SOLVER.MAX_ITER = 300  # 300 iterations seems good enough, but you can certainly train longer
 cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # faster, and good enough for this toy dataset
 cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1  # only has one class (glove)
 
-os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-trainer = DefaultTrainer(cfg)
-trainer.resume_or_load(resume=False)
-trainer.train()
+for d in ["train", "validation"]:
+    DatasetCatalog.register("gloves_" + d, lambda d=d: get_balloon_dicts("Dataset/" + d))
+    MetadataCatalog.get("gloves_" + d).set(thing_classes=['glove'])
+
+metadata = MetadataCatalog.get("gloves_train")
+
+try:
+    model_final_path = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+    open(model_final_path)
+    cfg.MODEL.WEIGHTS = model_final_path
+    print('model_final exist')
+except IOError:
+    print('model_final does not exist')
+    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
+    trainer = DefaultTrainer(cfg)
+    trainer.resume_or_load(resume=False)
+    trainer.train()
+
+
+# Visualize
+dataset_dicts = get_balloon_dicts("Dataset/train")
+for d in random.sample(dataset_dicts, 3):
+    img = cv2.imread(d["file_name"])
+    visualizer = Visualizer(img[:, :, ::-1], metadata=metadata, scale=0.5)
+    vis = visualizer.draw_dataset_dict(d)
+    # cv2.imshow('', vis.get_image()[:, :, ::-1])
+    # cv2.waitKey()
+
+# Predict
+cfg.DATASETS.TEST = ("gloves_validation", )
+cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7
+
+predictor = DefaultPredictor(cfg)
+
+dataset_dicts = get_balloon_dicts("Dataset/validation")
+for d in random.sample(dataset_dicts, 3):
+    im = cv2.imread(d["file_name"])
+    outputs = predictor(im)
+    v = Visualizer(im[:, :, ::-1],
+                   metadata=metadata,
+                   scale=0.5,
+                   instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+    )
+
+    print(outputs["instances"].to('cpu').pred_boxes)
+    # print(outputs["instances"].to("cpu").pred_classes)
+
+    # vis = v.draw_dataset_dict(d)
+    # cv2.imshow('', vis.get_image()[:, :, ::-1])
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()
+
+    v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+    cv2.imshow('', v.get_image()[:, :, ::-1])
+    cv2.waitKey()
