@@ -1,3 +1,5 @@
+I use the OIDv4 toolkit (https://github.com/sarmatkasaev/OIDv4_ToolKit) to download the images I need and convert them to detectron format
+
 #### Project folders
 * gloves (gloves detection)
 

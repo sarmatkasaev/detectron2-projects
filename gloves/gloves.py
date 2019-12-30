@@ -118,33 +118,38 @@ for d in random.sample(dataset_dicts, 3):
     cv2.waitKey()
 '''
 
+DatasetCatalog.clear()
+
+# Register dataset
+for d in ["train", "validation", "test"]:
+    DatasetCatalog.register("gloves_" + d, lambda d=d: get_balloon_dicts("Dataset/" + d))
+    MetadataCatalog.get("gloves_" + d).set(thing_classes=['glove'])
+
+
 # Train
 cfg = get_cfg()
-cfg.merge_from_file("../configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
-cfg.DATASETS.TRAIN = ("gloves_train",)
-cfg.DATASETS.TEST = ()
+cfg.OUTPUT_DIR = './output'
+cfg.merge_from_file("../configs/COCO-Detection/faster_rcnn_R_101_FPN_3x.yaml")
+cfg.MODEL.WEIGHTS = 'detectron2://COCO-Detection/faster_rcnn_R_101_FPN_3x/137851257/model_final_f6e8b1.pkl'
 cfg.DATALOADER.NUM_WORKERS = 2
 cfg.SOLVER.IMS_PER_BATCH = 2
 cfg.SOLVER.BASE_LR = 0.00025
 cfg.SOLVER.MAX_ITER = 300  # 300 iterations seems good enough, but you can certainly train longer
 cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # faster, and good enough for this toy dataset
-cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1  # only has one class (glove)
+cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2  # only has one class (glove) then 2: n + 1
+cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+cfg.DATASETS.TRAIN = ("gloves_train",)
+cfg.DATASETS.VALIDATION = ("gloves_validation", )
+cfg.DATASETS.TEST = ("gloves_test", )
 
-for d in ["train", "validation"]:
-    DatasetCatalog.register("gloves_" + d, lambda d=d: get_balloon_dicts("Dataset/" + d))
-    MetadataCatalog.get("gloves_" + d).set(thing_classes=['glove'])
-
-metadata = MetadataCatalog.get("gloves_train")
 
 try:
-    model_final_path = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
-    open(model_final_path)
-    cfg.MODEL.WEIGHTS = model_final_path
+    open(os.path.join(cfg.OUTPUT_DIR, "model_final.pth"))
+    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
     print('model_final exist')
-except IOError:
+except FileNotFoundError:
     print('model_final does not exist')
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
     trainer = DefaultTrainer(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
@@ -154,29 +159,23 @@ except IOError:
 dataset_dicts = get_balloon_dicts("Dataset/train")
 for d in random.sample(dataset_dicts, 3):
     img = cv2.imread(d["file_name"])
-    visualizer = Visualizer(img[:, :, ::-1], metadata=metadata, scale=0.5)
+    visualizer = Visualizer(img[:, :, ::-1], MetadataCatalog.get("gloves_train"), scale=0.5)
     vis = visualizer.draw_dataset_dict(d)
     # cv2.imshow('', vis.get_image()[:, :, ::-1])
     # cv2.waitKey()
 
-# Predict
-cfg.DATASETS.TEST = ("gloves_validation", )
-cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.7
 
 predictor = DefaultPredictor(cfg)
 
-dataset_dicts = get_balloon_dicts("Dataset/validation")
-for d in random.sample(dataset_dicts, 3):
+dataset_dicts = get_balloon_dicts("Dataset/test")
+for d in random.sample(dataset_dicts, 6):
     im = cv2.imread(d["file_name"])
     outputs = predictor(im)
-    v = Visualizer(im[:, :, ::-1],
-                   metadata=metadata,
-                   scale=0.5,
-                   instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
-    )
+    v = Visualizer(im[:, :, ::-1], MetadataCatalog.get('gloves_test'), scale=0.5)
 
+    print(outputs)
     print(outputs["instances"].to('cpu').pred_boxes)
-    # print(outputs["instances"].to("cpu").pred_classes)
+    print(outputs["instances"].to("cpu").pred_classes)
 
     # vis = v.draw_dataset_dict(d)
     # cv2.imshow('', vis.get_image()[:, :, ::-1])
