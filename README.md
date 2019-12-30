@@ -3,7 +3,7 @@ I use the OIDv4 toolkit (https://github.com/sarmatkasaev/OIDv4_ToolKit) to downl
 #### Project folders
 * gloves (gloves detection)
 
-#### Dataset structure
+#### Dataset structure (OID format)
 ```
 Dataset
 |
